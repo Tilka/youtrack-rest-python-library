@@ -14,7 +14,7 @@ import gdata.client
 import gdata.data
 
 import googleCode
-import googleCode.spock
+import googleCode.dolphin_emu
 from youtrack import YouTrackException, Issue, Comment
 from youtrack.connection import Connection
 from youtrack.importHelper import create_bundle_safe
