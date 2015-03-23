@@ -1,6 +1,8 @@
 import HTMLParser
 import calendar
 import re
+import itertools
+import json
 from urllib import unquote
 import urllib
 import urllib2
@@ -20,9 +22,9 @@ from youtrack.connection import Connection
 from youtrack.importHelper import create_bundle_safe
 
 def main():
-    source_login, source_password, target_url, target_login, target_password, project_name, project_id = sys.argv[1:]
-    googlecode2youtrack(project_name, source_login, source_password, target_url, target_login, target_password,
-        project_id)
+    target_url, target_login, target_password, project_name, project_id, file_name = sys.argv[1:]
+    googlecode2youtrack(project_name, target_url, target_login, target_password,
+        project_id, file_name)
 
 
 def create_and_attach_custom_field(target, project_id, field_name, field_type):
@@ -74,9 +76,8 @@ def get_yt_field_name(g_field_name):
 
 
 def get_custom_field_values(g_issue):
-    labels = [label.text for label in g_issue.label]
     values = {}
-    for label in labels:
+    for label in g_issue['labels']:
         if "-" not in label:
             continue
         name, value = label.split("-", 1)
@@ -91,34 +92,33 @@ def get_custom_field_values(g_issue):
 
 def to_yt_comment(target, comment):
     yt_comment = Comment()
-    yt_comment.author = comment.author[0].name.text
+    yt_comment.author = comment['author']['name']
     create_user(target, yt_comment.author)
-    if comment.content.text is None:
+    if comment['content'] is None:
         return None
-    yt_comment.text = comment.content.text.encode('utf-8')
-    yt_comment.created = to_unix_date(comment.published.text)
+    yt_comment.text = comment['content'].encode('utf-8')
+    yt_comment.created = to_unix_date(comment['published'])
     return yt_comment
 
 
 def to_yt_issue(target, project_id, g_issue, g_comments):
     issue = Issue()
     issue.numberInProject = issue_id(g_issue)
-    issue.summary = g_issue.title.text.encode('utf-8')
-    issue.description = HTMLParser.HTMLParser().unescape(g_issue.content.text).replace("<b>", "*").replace("</b>", "*").encode('utf-8')
-#    issue.description = g_issue.content.text.encode('utf-8')
-    issue.created = to_unix_date(g_issue.published.text)
-    issue.updated = to_unix_date(g_issue.updated.text)
-    reporter = g_issue.author[0].name.text
+    issue.summary = g_issue['summary'].encode('utf-8')
+    issue.description = g_comments[0]['content'].replace("<b>", "*").replace("</b>", "*").encode('utf-8')
+    issue.created = to_unix_date(g_issue['published'])
+    issue.updated = to_unix_date(g_issue['updated'])
+    reporter = g_issue['author']['name']
     create_user(target, reporter)
     issue.reporterName = reporter
-    assignee = g_issue.owner.username.text if hasattr(g_issue, "owner") and (g_issue.owner is not None) else None
+    assignee = g_issue['owner']['name'] if 'owner' in g_issue else None
     assignee_field_name = get_yt_field_name("owner")
     if assignee is not None:
         add_value_to_field(target, project_id, assignee_field_name, googleCode.FIELD_TYPES[assignee_field_name],
             assignee)
         issue[assignee_field_name] = assignee
     status_field_name = get_yt_field_name("status")
-    status = g_issue.status.text if hasattr(g_issue, "status") and (g_issue.status is not None) else None
+    status = g_issue['status'] if 'status' in g_issue else None
     if status is not None:
         add_value_to_field(target, project_id, status_field_name, googleCode.FIELD_TYPES[status_field_name], status)
         issue[status_field_name] = status
@@ -129,7 +129,7 @@ def to_yt_issue(target, project_id, g_issue, g_comments):
         issue[field_name] = field_value
 
     issue.comments = []
-    for comment in g_comments:
+    for comment in g_comments[1:]:
         yt_comment = to_yt_comment(target, comment)
         if yt_comment is not None:
             issue.comments.append(yt_comment)
@@ -138,8 +138,8 @@ def to_yt_issue(target, project_id, g_issue, g_comments):
 
 
 def get_tags(issue):
-    return [label.text for label in issue.label if
-            get_yt_field_name(label.text.split("-")[0]) not in googleCode.FIELD_TYPES.keys()]
+    return [label for label in issue['labels'] if
+            get_yt_field_name(label.split("-")[0]) not in googleCode.FIELD_TYPES.keys()]
 
 
 def import_tags(target, project_id, issue):
@@ -150,16 +150,12 @@ def import_tags(target, project_id, issue):
             print str(e)
 
 
-def get_issue_href(issue):
-    return filter(lambda l: l.rel == 'alternate', issue.link)[0].href
-
-
 def issue_id(i):
-    return i.get_elements(tag='id', namespace='http://schemas.google.com/projecthosting/issues/2009')[0].text
+    return i['id']
 
 
 def get_attachments(projectName, issue):
-    content = urllib.urlopen(get_issue_href(issue)).read()
+    content = urllib.urlopen('https://code.google.com/p/{}/issues/detail?id={}'.format(projectName, issue_id(issue))).read()
 
     attach = re.compile(
         '<a href="(http://' + projectName + '\.googlecode\.com/issues/attachment\?aid=\S+name=(\S+)&\S+)">Download</a>')
@@ -187,8 +183,16 @@ def import_attachments(target, project_id, project_name, issue, author_login):
             group=None)
 
 
-def googlecode2youtrack(project_name, source_login, source_password, target_url, target_login, target_password,
-                        project_id):
+def get_project(project_name, file_name):
+    data = json.load(open(file_name))
+    projects = data['projects']
+    for project in projects:
+        if project['externalId'] == project_name:
+            return project
+    raise Exception('cannot find project in json file')
+
+
+def googlecode2youtrack(project_name, target_url, target_login, target_password, project_id, file_name):
     target = Connection(target_url, target_login, target_password)
 
     try:
@@ -199,24 +203,26 @@ def googlecode2youtrack(project_name, source_login, source_password, target_url,
     for field_name, field_type in googleCode.FIELD_TYPES.items():
         create_and_attach_custom_field(target, project_id, field_name, field_type)
 
-    start = 1
+    start = 0
     max = 30
 
+    project = get_project(project_name, file_name)
+    issues = project['issues']
+    print('Found {} issues.'.format(issues['totalResults']))
+
     while True:
-        source = gdata.projecthosting.client.ProjectHostingClient()
-        source.client_login(source_login, source_password, source="youtrack", service="code")
-        print "Get issues from " + str(start) + " to " + str(start + max)
-        query = gdata.projecthosting.client.Query(start_index=start, max_results=max)
-        issues = source.get_issues(project_name, query=query).entry
+        issues_chunk = issues['items'][start:start + max]
         start += max
 
-        if len(issues) <= 0:
+        if len(issues_chunk) == 0:
             break
 
-        target.importIssues(project_id, project_name + " assignees",
-            [to_yt_issue(target, project_id, issue, source.get_comments(project_name, issue_id(issue)).entry) for issue
-             in issues])
-        for issue in issues:
+        print 'Importing issues {} to {}...'.format(issues_chunk[0]['id'], issues_chunk[-1]['id'])
+        target.importIssues(
+                project_id, project_name + " assignees",
+                [to_yt_issue(target, project_id, issue, issue['comments']['items']) for issue in issues_chunk]
+        )
+        for issue in issues_chunk:
             import_tags(target, project_id, issue)
             import_attachments(target, project_id, project_name, issue, target_login)
 
