@@ -100,7 +100,7 @@ def to_yt_comment(target, comment):
     yt_comment = Comment()
     yt_comment.author = comment['author']['name']
     create_user(target, yt_comment.author)
-    yt_comment.text = html.unescape(comment['content'].encode('utf-8')) or "''(No comment was entered for this change.)''"
+    yt_comment.text = html.unescape(comment['content']).encode('utf-8') or "''(No comment was entered for this change.)''"
     yt_comment.created = to_unix_date(comment['published'])
     return yt_comment
 
@@ -109,7 +109,7 @@ def to_yt_issue(target, project_id, g_issue, g_comments):
     issue = Issue()
     issue.numberInProject = issue_id(g_issue)
     issue.summary = g_issue['summary'].encode('utf-8') or '(No Summary)'
-    issue.description = html.unescape(g_comments[0]['content'].replace("<b>", "*").replace("</b>", "*").encode('utf-8'))
+    issue.description = html.unescape(g_comments[0]['content'].replace("<b>", "*").replace("</b>", "*")).encode('utf-8')
     issue.created = to_unix_date(g_issue['published'])
     issue.updated = to_unix_date(g_issue['updated'])
     reporter = g_issue['author']['name']
