@@ -1,3 +1,5 @@
+#!/usr/bin/env python2
+
 import HTMLParser
 import calendar
 import re
@@ -20,6 +22,10 @@ import googleCode.dolphin_emu
 from youtrack import YouTrackException, Issue, Comment
 from youtrack.connection import Connection
 from youtrack.importHelper import create_bundle_safe
+
+
+html = HTMLParser.HTMLParser()
+
 
 def main():
     target_url, target_login, target_password, project_name, project_id, file_name = sys.argv[1:]
@@ -77,7 +83,7 @@ def get_yt_field_name(g_field_name):
 
 def get_custom_field_values(g_issue):
     values = {}
-    for label in g_issue['labels']:
+    for label in g_issue.get('labels', []):
         if "-" not in label:
             continue
         name, value = label.split("-", 1)
@@ -94,9 +100,7 @@ def to_yt_comment(target, comment):
     yt_comment = Comment()
     yt_comment.author = comment['author']['name']
     create_user(target, yt_comment.author)
-    if comment['content'] is None:
-        return None
-    yt_comment.text = comment['content'].encode('utf-8')
+    yt_comment.text = html.unescape(comment['content'].encode('utf-8')) or "''(No comment was entered for this change.)''"
     yt_comment.created = to_unix_date(comment['published'])
     return yt_comment
 
@@ -104,8 +108,8 @@ def to_yt_comment(target, comment):
 def to_yt_issue(target, project_id, g_issue, g_comments):
     issue = Issue()
     issue.numberInProject = issue_id(g_issue)
-    issue.summary = g_issue['summary'].encode('utf-8')
-    issue.description = g_comments[0]['content'].replace("<b>", "*").replace("</b>", "*").encode('utf-8')
+    issue.summary = g_issue['summary'].encode('utf-8') or '(No Summary)'
+    issue.description = html.unescape(g_comments[0]['content'].replace("<b>", "*").replace("</b>", "*").encode('utf-8'))
     issue.created = to_unix_date(g_issue['published'])
     issue.updated = to_unix_date(g_issue['updated'])
     reporter = g_issue['author']['name']
@@ -151,7 +155,7 @@ def import_tags(target, project_id, issue):
 
 
 def issue_id(i):
-    return i['id']
+    return str(i['id'])
 
 
 def get_attachments(projectName, issue):
