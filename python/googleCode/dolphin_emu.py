@@ -44,6 +44,6 @@ googleCode.FIELD_TYPES = {
         'Fix versions': 'version[*]',
         'Priority':     'enum[1]',
         'State':        'state[1]',
-        'Subsytem':     'ownedField[1]',
+        'Subsystem':    'ownedField[1]',
         'Type':         'enum[1]',
 }
